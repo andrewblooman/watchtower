@@ -1,6 +1,6 @@
 # SRE Agent Dashboard (Prototype)
 
-![Dashboard Screenshot](dashboard.png)
+![Dashboard Screenshot](Dashboard.png)
 
 Fast demoable “AI Reliability Engineer Platform” that runs locally in Docker Compose:
 
