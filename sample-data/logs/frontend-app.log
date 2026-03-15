@@ -1,0 +1,4 @@
+2026-03-15T22:24:01Z INFO service=frontend-app env=production msg="Deployed version 0.9.0"
+2026-03-15T22:24:09Z ERROR service=frontend-app env=production msg="Timeout contacting payment-api" code=UPSTREAM_TIMEOUT
+2026-03-15T22:24:10Z ERROR service=frontend-app env=production msg="HTTP 504 from upstream" code=GATEWAY_TIMEOUT
+

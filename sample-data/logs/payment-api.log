@@ -1,0 +1,7 @@
+2026-03-15T22:20:01Z INFO service=payment-api env=production msg="Starting up"
+2026-03-15T22:20:11Z INFO service=payment-api env=production msg="Connected to DB"
+2026-03-15T22:21:42Z ERROR service=payment-api env=production msg="Database authentication failure" code=DB_AUTH_FAILED
+2026-03-15T22:21:43Z ERROR service=payment-api env=production msg="Retrying connection" attempt=1
+2026-03-15T22:22:07Z WARN service=payment-api env=production msg="Elevated 5xx rate detected"
+2026-03-15T22:23:10Z INFO service=payment-api env=production msg="RECOVERY: credentials rotated, connection restored"
+

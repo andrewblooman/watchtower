@@ -1,0 +1,3 @@
+2026-03-15T22:19:01Z INFO service=user-service env=staging msg="Deployed version 1.12.4"
+2026-03-15T22:19:12Z INFO service=user-service env=staging msg="Health check OK"
+
