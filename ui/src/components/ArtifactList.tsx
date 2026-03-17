@@ -1,30 +1,38 @@
-import type { ArtifactRow } from "@/lib/types";
-import { formatAgo } from "@/lib/time";
+import { Download, FileCode, FileJson, FileText } from "lucide-react";
+import { S3Icon } from "@/components/icons/AwsIcons";
 
 interface ArtifactListProps {
-  artifacts: ArtifactRow[];
-  apiBase: string;
+  filenames: string[];
+  downloadUrl: (name: string) => string;
 }
 
-export default function ArtifactList({ artifacts, apiBase }: ArtifactListProps) {
+function fileIcon(name: string) {
+  const ext = name.split(".").pop()?.toLowerCase();
+  if (ext === "json") return <FileJson size={14} className="shrink-0 text-amber-300" />;
+  if (ext === "md") return <FileText size={14} className="shrink-0 text-sky-300" />;
+  return <FileCode size={14} className="shrink-0 text-slate-400" />;
+}
+
+export default function ArtifactList({ filenames, downloadUrl }: ArtifactListProps) {
   return (
     <div className="space-y-2">
-      {artifacts.slice(0, 4).map((a) => (
+      {filenames.slice(0, 8).map((name) => (
         <a
-          key={a.id}
-          className="flex items-center justify-between gap-3 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm hover:bg-white/10"
-          href={`${apiBase}/v1/artifacts/${a.id}/download`}
-          target="_blank"
-          rel="noreferrer"
+          key={name}
+          className="flex items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm hover:bg-white/10 group"
+          href={downloadUrl(name)}
+          download
         >
-          <div className="min-w-0">
-            <div className="truncate">{a.name}</div>
-            <div className="text-xs muted truncate">{a.path_or_url}</div>
+          {fileIcon(name)}
+          <span className="truncate font-mono text-xs text-indigo-300 group-hover:text-indigo-200 flex-1">{name}</span>
+          <div className="shrink-0 flex items-center gap-1 opacity-60 group-hover:opacity-100">
+            <S3Icon size={12} />
+            <Download size={12} className="text-slate-400" />
           </div>
-          <div className="text-xs muted shrink-0">{formatAgo(a.created_at)}</div>
         </a>
       ))}
-      {artifacts.length === 0 && <div className="text-sm muted">No artifacts yet.</div>}
+      {filenames.length === 0 && <div className="text-sm muted">No artifacts yet.</div>}
     </div>
   );
 }
+

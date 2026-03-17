@@ -1,0 +1,19 @@
+# docker-compose.override.yml
+# Automatically applied by `docker compose up` for local development.
+# Activates LOCAL_DEV mode: reads sample-data logs and uses a stub Bedrock client.
+#
+# For production-like testing without this override:
+#   docker compose -f docker-compose.yml up
+
+services:
+  app:
+    environment:
+      LOCAL_DEV: "true"
+      SAMPLE_DATA_DIR: "/app/sample-data"
+      # Sample deployment identity matching the included log files
+      GITHUB_REPO: "myorg/payment-api"
+      COMMIT_SHA: "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2"
+      SERVICE_NAME: "payment-api"
+      ENVIRONMENT: "production"
+    volumes:
+      - ./sample-data:/app/sample-data:ro

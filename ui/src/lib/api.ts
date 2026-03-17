@@ -1,13 +1,14 @@
 import type {
-  ArtifactRow,
+  CommandRecord,
   DashboardSummary,
-  EventRow,
-  FiltersResponse,
-  IncidentDetail,
-  IncidentRow
+  ReasoningTurn,
+  SessionDetail,
+  SessionListItem,
 } from "@/lib/types";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000";
+// Empty string = same origin (when served by FastAPI).
+// Override with NEXT_PUBLIC_API_BASE=http://localhost:8000 in ui/.env.local for local dev.
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "";
 
 async function getJson<T>(path: string): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, { cache: "no-store" });
@@ -15,43 +16,31 @@ async function getJson<T>(path: string): Promise<T> {
   return (await res.json()) as T;
 }
 
-export function fetchFilters(tenantId?: string): Promise<FiltersResponse> {
-  const q = tenantId ? `?tenant_id=${encodeURIComponent(tenantId)}` : "";
-  return getJson(`/v1/filters${q}`);
+export function fetchSessions(status?: string): Promise<SessionListItem[]> {
+  const q = status ? `?status=${encodeURIComponent(status)}` : "";
+  return getJson(`/v1/sessions${q}`);
 }
 
-export function fetchDashboardSummary(scope: { tenantId: string; serviceId: string; environmentId: string }): Promise<DashboardSummary> {
-  const q = `?tenant_id=${scope.tenantId}&service_id=${scope.serviceId}&environment_id=${scope.environmentId}`;
-  return getJson(`/v1/dashboard/summary${q}`);
+export function fetchSession(sessionId: string): Promise<SessionDetail> {
+  return getJson(`/v1/sessions/${encodeURIComponent(sessionId)}`);
 }
 
-export function fetchIncidents(scope: { tenantId: string; serviceId: string; environmentId: string }): Promise<IncidentRow[]> {
-  const q = `?tenant_id=${scope.tenantId}&service_id=${scope.serviceId}&environment_id=${scope.environmentId}&status=active`;
-  return getJson(`/v1/incidents${q}`);
+export function fetchCommands(sessionId: string): Promise<CommandRecord[]> {
+  return getJson(`/v1/sessions/${encodeURIComponent(sessionId)}/commands`);
 }
 
-export function fetchIncident(id: string): Promise<IncidentDetail> {
-  return getJson(`/v1/incidents/${id}`);
+export function fetchReasoning(sessionId: string): Promise<ReasoningTurn[]> {
+  return getJson(`/v1/sessions/${encodeURIComponent(sessionId)}/reasoning`);
 }
 
-export function fetchEvents(
-  scope: { tenantId: string; serviceId: string; environmentId: string },
-  opts?: { incidentId?: string; limit?: number }
-): Promise<EventRow[]> {
-  const params = new URLSearchParams({
-    tenant_id: scope.tenantId,
-    service_id: scope.serviceId,
-    environment_id: scope.environmentId,
-    limit: String(opts?.limit ?? 200)
-  });
-  if (opts?.incidentId) params.set("incident_id", opts.incidentId);
-  return getJson(`/v1/events?${params.toString()}`);
+export function fetchArtifacts(sessionId: string): Promise<string[]> {
+  return getJson(`/v1/sessions/${encodeURIComponent(sessionId)}/artifacts`);
 }
 
-export function fetchArtifacts(opts: { runId?: string; incidentId?: string }): Promise<ArtifactRow[]> {
-  const params = new URLSearchParams();
-  if (opts.runId) params.set("run_id", opts.runId);
-  if (opts.incidentId) params.set("incident_id", opts.incidentId);
-  return getJson(`/v1/artifacts?${params.toString()}`);
+export function fetchDashboardSummary(): Promise<DashboardSummary> {
+  return getJson("/v1/dashboard/summary");
 }
 
+export function artifactDownloadUrl(sessionId: string, filename: string): string {
+  return `${API_BASE}/v1/sessions/${encodeURIComponent(sessionId)}/artifacts/${encodeURIComponent(filename)}/download`;
+}

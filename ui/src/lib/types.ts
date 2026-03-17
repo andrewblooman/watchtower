@@ -1,40 +1,72 @@
-export type IdName = { id: string; name: string };
+export type SessionMeta = {
+  session_id: string;
+  github_repo: string;
+  commit_sha: string;
+  commit_short: string;
+  service_name: string;
+  environment: string;
+  started_at: string;
+  status: string; // investigating | resolved | failed | timeout
+  completed_at: string | null;
+  event_metadata: Record<string, unknown>;
+  source: string; // cache | s3
+};
 
-export type FiltersResponse = {
-  tenants: IdName[];
-  services: IdName[];
-  environments: IdName[];
+export type InvestigationSummary = {
+  session_id: string;
+  root_cause: string | null;
+  confidence: number | null;
+  recommendation: string | null;
+  commands_count: number;
+  reasoning_turns: number;
+  resolution: string | null; // resolved | unresolved
+};
+
+export type CommandRecord = {
+  ts: string;
+  type: string; // shell | tool
+  command: string;
+  args: Record<string, unknown> | null;
+  stdout: string | null;
+  stderr: string | null;
+  exit_code: number | null;
+  result: unknown;
+};
+
+export type ReasoningTurn = {
+  ts: string;
+  turn: number;
+  model: string;
+  prompt_tokens: number | null;
+  completion_tokens: number | null;
+  prompt_summary: string;
+  response: string;
+};
+
+export type SessionListItem = {
+  session_id: string;
+  github_repo: string;
+  commit_short: string;
+  service_name: string;
+  environment: string;
+  started_at: string;
+  status: string;
+  source: string; // cache | s3
+};
+
+export type SessionDetail = {
+  session: SessionMeta;
+  summary: InvestigationSummary | null;
+  commands_count: number;
+  reasoning_turns: number;
+  artifacts: string[];
 };
 
 export type DashboardSummary = {
-  active_incidents: number;
-  tests_executed_today: number;
-  recent_rollbacks: number;
-  llm_insights_used: number;
-};
-
-export type IncidentRow = {
-  id: string;
-  service: string;
-  environment: string;
-  status: string;
-  title: string;
-  root_cause_summary: string | null;
-  detected_at: string;
-};
-
-export type IncidentDetail = {
-  id: string;
-  tenant_id: string;
-  service_id: string;
-  environment_id: string;
-  run_id: string;
-  status: string;
-  title: string;
-  root_cause_summary: string | null;
-  confidence: number | null;
-  detected_at: string;
-  resolved_at: string | null;
+  active_sessions: number;
+  completed_sessions: number;
+  total_sessions: number;
+  recent_repos: string[];
 };
 
 export type EventRow = {
@@ -43,17 +75,23 @@ export type EventRow = {
   type: string;
   message: string;
   meta: Record<string, unknown>;
-  run_id: string;
-  incident_id: string | null;
 };
 
-export type ArtifactRow = {
+export type IncidentDetail = {
+  root_cause_summary: string | null;
+  confidence: number | null;
+};
+
+export type IdName = {
   id: string;
-  kind: string;
   name: string;
-  path_or_url: string;
-  created_at: string;
-  run_id: string;
-  incident_id: string | null;
 };
 
+export type IncidentRow = {
+  id: string;
+  service: string;
+  environment: string;
+  status: string;
+  root_cause_summary: string | null;
+  detected_at: string;
+};

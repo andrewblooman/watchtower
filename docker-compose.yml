@@ -1,58 +1,49 @@
 services:
-  postgres:
-    image: postgres:16-alpine
-    environment:
-      POSTGRES_DB: sre_agent
-      POSTGRES_USER: sre_agent
-      POSTGRES_PASSWORD: sre_agent
+  localstack:
+    image: localstack/localstack:latest
     ports:
-      - "5432:5432"
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-
-  api:
-    build:
-      context: ./api
+      - "4566:4566"
     environment:
-      DATABASE_URL: postgresql+asyncpg://sre_agent:sre_agent@postgres:5432/sre_agent
-      INGEST_API_KEY: devkey
-      INGEST_AUTH_DISABLED: "false"
-      ARTIFACTS_DIR: /data/artifacts
-      CORS_ORIGINS: http://localhost:3000
+      SERVICES: s3
+      DEFAULT_REGION: us-east-1
+    volumes:
+      - ./localstack-init:/etc/localstack/init/ready.d
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  app:
+    build:
+      context: .
+    environment:
+      # Deployment identity (injected by EventBridge -> ECS task overrides in production)
+      GITHUB_REPO: "myorg/my-service"
+      COMMIT_SHA: "0000000000000000000000000000000000000000"
+      SERVICE_NAME: "my-service"
+      ENVIRONMENT: "production"
+      # S3 (points at LocalStack for local dev)
+      S3_BUCKET: "sre-agent-investigations"
+      S3_PREFIX: "investigations"
+      S3_REGION: "us-east-1"
+      AWS_ENDPOINT_URL: "http://localstack:4566"
+      AWS_ACCESS_KEY_ID: "test"
+      AWS_SECRET_ACCESS_KEY: "test"
+      # Bedrock (real AWS region; no local mock by default)
+      BEDROCK_REGION: "us-east-1"
+      BEDROCK_MODEL: "anthropic.claude-3-5-sonnet-20241022-v2:0"
+      # Cache
+      CACHE_DIR: "/data/cache"
+      CACHE_TTL_HOURS: "6"
     depends_on:
-      - postgres
+      localstack:
+        condition: service_healthy
     ports:
       - "8000:8000"
     volumes:
-      - artifacts:/data/artifacts
-
-  agent:
-    build:
-      context: ./agent
-    environment:
-      API_BASE: http://api:8000
-      INGEST_API_KEY: devkey
-      MODE: persistent
-      INTERVAL_SECONDS: "10"
-      LOGS_DIR: /sample-data/logs
-      ARTIFACTS_DIR: /data/artifacts
-    depends_on:
-      - api
-    volumes:
-      - ./sample-data/logs:/sample-data/logs:ro
-      - artifacts:/data/artifacts
-
-  ui:
-    build:
-      context: ./ui
-    environment:
-      NEXT_PUBLIC_API_BASE: http://localhost:8000
-    depends_on:
-      - api
-    ports:
-      - "3000:3000"
+      - cache:/data/cache
 
 volumes:
-  pgdata:
-  artifacts:
-
+  cache:

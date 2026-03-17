@@ -1,42 +1,38 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import dynamic from "next/dynamic";
 import type {
-  ArtifactRow,
+  CommandRecord,
   DashboardSummary,
-  EventRow,
-  FiltersResponse,
-  IncidentDetail,
-  IncidentRow,
+  ReasoningTurn,
+  SessionDetail,
+  SessionListItem,
 } from "@/lib/types";
 import {
-  fetchArtifacts,
+  artifactDownloadUrl,
   fetchDashboardSummary,
-  fetchEvents,
-  fetchFilters,
-  fetchIncident,
-  fetchIncidents,
+  fetchCommands,
+  fetchReasoning,
+  fetchSession,
+  fetchSessions,
 } from "@/lib/api";
 import {
-  MOCK_ARTIFACTS,
-  MOCK_EVENTS,
-  MOCK_FILTERS,
-  MOCK_INCIDENT_DETAIL,
-  MOCK_INCIDENTS,
+  MOCK_COMMANDS,
+  MOCK_REASONING,
+  MOCK_SESSION_DETAIL,
+  MOCK_SESSIONS,
   MOCK_SUMMARY,
 } from "@/lib/mockData";
+import { formatTs } from "@/lib/time";
 import Panel, { PanelHeader } from "@/components/Panel";
 import KpiCard from "@/components/KpiCard";
-import FilterSelect from "@/components/FilterSelect";
-import IncidentsTable from "@/components/IncidentsTable";
-import RcaPanel from "@/components/RcaPanel";
+import SessionsTable from "@/components/SessionsTable";
+import InvestigationPanel from "@/components/InvestigationPanel";
 import ArtifactList from "@/components/ArtifactList";
-import SlackNotifications from "@/components/SlackNotifications";
-
-const Charts = dynamic(() => import("@/components/charts"), { ssr: false });
-
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000";
+import SlackNotifications, { sessionNotifications } from "@/components/SlackNotifications";
+import { CommandChart, ReasoningChart } from "@/components/charts";
+import { BedrockIcon, CloudWatchIcon, ECSIcon, S3Icon } from "@/components/icons/AwsIcons";
+import { Activity, AlertTriangle, BrainCircuit, CheckCircle2, GitBranch, Terminal, Wrench } from "lucide-react";
 
 async function tryFetch<T>(fn: () => Promise<T>, fallback: T): Promise<T> {
   try {
@@ -46,34 +42,37 @@ async function tryFetch<T>(fn: () => Promise<T>, fallback: T): Promise<T> {
   }
 }
 
+/** Pick the right AWS icon for a command string */
+function CommandIcon({ command, type }: { command: string; type: string }) {
+  if (type === "shell") return <Terminal size={12} className="shrink-0 text-sky-400" />;
+  if (command.startsWith("cloudwatch:")) return <CloudWatchIcon size={14} />;
+  if (command.startsWith("ecs:")) return <ECSIcon size={14} />;
+  if (command.startsWith("s3:")) return <S3Icon size={14} />;
+  if (command.startsWith("bedrock:")) return <BedrockIcon size={14} />;
+  return <Wrench size={12} className="shrink-0 text-violet-400" />;
+}
+
 export default function Page() {
   const [live, setLive] = useState(true);
   const [usingMock, setUsingMock] = useState(false);
-  const [filters, setFilters] = useState<FiltersResponse>(MOCK_FILTERS);
-  const [tenantId, setTenantId] = useState<string>(MOCK_FILTERS.tenants[0]?.id ?? "");
-  const [serviceId, setServiceId] = useState<string>(MOCK_FILTERS.services[0]?.id ?? "");
-  const [environmentId, setEnvironmentId] = useState<string>(MOCK_FILTERS.environments[0]?.id ?? "");
 
+  const [sessions, setSessions] = useState<SessionListItem[]>(MOCK_SESSIONS);
   const [summary, setSummary] = useState<DashboardSummary>(MOCK_SUMMARY);
-  const [incidents, setIncidents] = useState<IncidentRow[]>(MOCK_INCIDENTS);
-  const [selectedIncidentId, setSelectedIncidentId] = useState<string | null>(MOCK_INCIDENTS[0]?.id ?? null);
-  const [incidentDetail, setIncidentDetail] = useState<IncidentDetail | null>(MOCK_INCIDENT_DETAIL);
-  const [incidentEvents, setIncidentEvents] = useState<EventRow[]>(
-    MOCK_EVENTS.filter((e) => e.incident_id === MOCK_INCIDENTS[0]?.id)
-  );
-  const [events, setEvents] = useState<EventRow[]>(MOCK_EVENTS);
-  const [artifacts, setArtifacts] = useState<ArtifactRow[]>(MOCK_ARTIFACTS);
+  const [selectedId, setSelectedId] = useState<string | null>(MOCK_SESSIONS[0]?.session_id ?? null);
+  const [sessionDetail, setSessionDetail] = useState<SessionDetail | null>(MOCK_SESSION_DETAIL);
+  const [reasoning, setReasoning] = useState<ReasoningTurn[]>(MOCK_REASONING);
+  const [commands, setCommands] = useState<CommandRecord[]>(MOCK_COMMANDS);
 
-  // Load real filters; fall back to mock if API is unreachable
+  // Initial load — try real API, fall back to mock
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const real = await tryFetch(() => fetchFilters(), null);
+      const real = await tryFetch(() => fetchSessions(), null);
       if (cancelled) return;
-      if (real) {
+      if (real !== null) {
         setUsingMock(false);
-        setFilters(real);
-        setTenantId(real.tenants[0]?.id ?? "");
+        setSessions(real);
+        if (!selectedId && real[0]) setSelectedId(real[0].session_id);
       } else {
         setUsingMock(true);
       }
@@ -81,107 +80,69 @@ export default function Page() {
     return () => { cancelled = true; };
   }, []);
 
-  useEffect(() => {
-    if (!tenantId || usingMock) return;
-    let cancelled = false;
-    (async () => {
-      const f = await tryFetch(() => fetchFilters(tenantId), MOCK_FILTERS);
-      if (cancelled) return;
-      setFilters(f);
-      setServiceId(f.services[0]?.id ?? "");
-      setEnvironmentId(f.environments[0]?.id ?? "");
-      setSelectedIncidentId(null);
-    })();
-    return () => { cancelled = true; };
-  }, [tenantId, usingMock]);
-
-  const scope = useMemo(
-    () => ({ tenantId, serviceId, environmentId }),
-    [tenantId, serviceId, environmentId]
-  );
-
-  const ready = Boolean(tenantId && serviceId && environmentId);
-
+  // Polling refresh
   useEffect(() => {
     if (usingMock) return;
-    if (!ready) return;
     let cancelled = false;
-
     async function refresh() {
-      const [s, inc, ev] = await Promise.all([
-        tryFetch(() => fetchDashboardSummary(scope), MOCK_SUMMARY),
-        tryFetch(() => fetchIncidents(scope), MOCK_INCIDENTS),
-        tryFetch(() => fetchEvents(scope, { limit: 400 }), MOCK_EVENTS),
+      const [sess, summ] = await Promise.all([
+        tryFetch(() => fetchSessions(), MOCK_SESSIONS),
+        tryFetch(() => fetchDashboardSummary(), MOCK_SUMMARY),
       ]);
       if (cancelled) return;
-      setSummary(s);
-      setIncidents(inc);
-      setEvents(ev);
-      if (!selectedIncidentId && inc[0]?.id) setSelectedIncidentId(inc[0].id);
+      setSessions(sess);
+      setSummary(summ);
     }
-
     refresh();
     if (!live) return () => {};
-    const id = setInterval(() => refresh(), 5000);
+    const id = setInterval(refresh, 5000);
     return () => { cancelled = true; clearInterval(id); };
-  }, [ready, scope, live, selectedIncidentId, usingMock]);
+  }, [live, usingMock]);
 
+  // Load selected session detail + reasoning + commands
   useEffect(() => {
     if (usingMock) {
-      setIncidentDetail(selectedIncidentId ? MOCK_INCIDENT_DETAIL : null);
-      setIncidentEvents(
-        selectedIncidentId
-          ? MOCK_EVENTS.filter((e) => e.incident_id === selectedIncidentId)
-          : []
-      );
-      setArtifacts(
-        selectedIncidentId
-          ? MOCK_ARTIFACTS.filter((a) => a.incident_id === selectedIncidentId)
-          : MOCK_ARTIFACTS
-      );
+      setSessionDetail(selectedId ? MOCK_SESSION_DETAIL : null);
+      setReasoning(selectedId ? MOCK_REASONING : []);
+      setCommands(selectedId ? MOCK_COMMANDS : []);
       return;
     }
-
-    if (!ready || !selectedIncidentId) {
-      setIncidentDetail(null);
-      setIncidentEvents([]);
-      setArtifacts([]);
-      return;
-    }
+    if (!selectedId) { setSessionDetail(null); setReasoning([]); setCommands([]); return; }
     let cancelled = false;
     (async () => {
-      const detail = await tryFetch(() => fetchIncident(selectedIncidentId), MOCK_INCIDENT_DETAIL);
-      const [ev, arts] = await Promise.all([
-        tryFetch(() => fetchEvents(scope, { incidentId: selectedIncidentId, limit: 200 }), []),
-        tryFetch(() => fetchArtifacts({ incidentId: selectedIncidentId }), []),
+      const [detail, turns, cmds] = await Promise.all([
+        tryFetch(() => fetchSession(selectedId), MOCK_SESSION_DETAIL),
+        tryFetch(() => fetchReasoning(selectedId), MOCK_REASONING),
+        tryFetch(() => fetchCommands(selectedId), MOCK_COMMANDS),
       ]);
       if (cancelled) return;
-      setIncidentDetail(detail);
-      setIncidentEvents(ev);
-      setArtifacts(arts);
+      setSessionDetail(detail);
+      setReasoning(turns);
+      setCommands(cmds);
     })();
     return () => { cancelled = true; };
-  }, [ready, selectedIncidentId, scope, usingMock]);
+  }, [selectedId, usingMock]);
 
-  const slackEvents = useMemo(
-    () => events.filter((e) => e.type === "slack_sent").slice(0, 3),
-    [events]
+  const selectedSession = useMemo(
+    () => sessions.find((s) => s.session_id === selectedId) ?? null,
+    [sessions, selectedId],
   );
 
-  const selectedTenant = filters.tenants.find((t) => t.id === tenantId)?.name ?? "—";
-  const selectedService = filters.services.find((s) => s.id === serviceId)?.name ?? "—";
-  const selectedEnv = filters.environments.find((e) => e.id === environmentId)?.name ?? "—";
+  const artifacts = sessionDetail?.artifacts ?? [];
+  const slackNotifications = useMemo(() => sessionNotifications(sessions), [sessions]);
 
   return (
     <main className="mx-auto max-w-7xl px-6 py-8">
-      {/* Header */}
-      <div className="flex items-start justify-between gap-6">
-        <div>
-          <div className="text-sm font-semibold tracking-wide text-white/80">
-            AI Reliability Engineer Platform
+
+      {/* ── Header ── */}
+      <div className="flex items-center justify-between gap-6">
+        <div className="flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-600/30 border border-indigo-500/30">
+            <Activity size={22} className="text-indigo-300" />
           </div>
-          <div className="mt-1 text-xs muted">
-            Intelligent diagnostics &amp; automated incident management
+          <div>
+            <div className="text-lg font-bold tracking-tight text-white">SRE Debugging Agent</div>
+            <div className="text-xs muted">Ephemeral ECS investigation · results persisted to S3</div>
           </div>
         </div>
         <div className="flex items-center gap-3">
@@ -191,131 +152,190 @@ export default function Page() {
             </span>
           )}
           <button
-            className={`h-10 rounded-lg px-4 text-sm font-medium border ${
+            className={`h-8 rounded-lg px-3 text-xs font-medium border transition-colors ${
               live
-                ? "border-emerald-400/30 bg-emerald-500/10 text-emerald-200"
-                : "border-white/10 bg-white/5 text-slate-200"
+                ? "border-emerald-400/30 bg-emerald-500/10 text-emerald-200 hover:bg-emerald-500/15"
+                : "border-white/10 bg-white/5 text-slate-300 hover:bg-white/10"
             }`}
             onClick={() => setLive((v) => !v)}
           >
-            {live ? "Live: On" : "Live: Paused"}
+            {live ? "● Live" : "○ Paused"}
           </button>
         </div>
       </div>
 
-      {/* Filter bar */}
-      <Panel className="mt-6">
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-          <FilterSelect label="Tenant" value={tenantId} onChange={setTenantId} options={filters.tenants} />
-          <FilterSelect label="Service" value={serviceId} onChange={setServiceId} options={filters.services} />
-          <FilterSelect
-            label="Environment"
-            value={environmentId}
-            onChange={setEnvironmentId}
-            options={filters.environments}
-          />
+      {/* ── KPI row ── */}
+      <div className="mt-6 grid grid-cols-2 gap-4 md:grid-cols-4">
+        <KpiCard
+          title="Active Sessions"
+          value={summary.active_sessions}
+          tone="warn"
+          icon={<AlertTriangle size={18} />}
+        />
+        <KpiCard
+          title="Completed"
+          value={summary.completed_sessions}
+          tone="ok"
+          icon={<CheckCircle2 size={18} />}
+        />
+        <KpiCard
+          title="Total Sessions"
+          value={summary.total_sessions}
+          tone="llm"
+          icon={<BrainCircuit size={18} />}
+        />
+        <div className="panel p-4 bg-gradient-to-br from-slate-500/10 to-slate-500/5 border-slate-500/20">
+          <div className="flex items-start justify-between gap-2">
+            <div className="flex-1 min-w-0">
+              <div className="text-xs muted">Recent Repos</div>
+              <div className="mt-1 space-y-1">
+                {summary.recent_repos.slice(0, 2).map((r) => (
+                  <div key={r} className="truncate text-xs text-slate-300 font-mono">{r}</div>
+                ))}
+                {summary.recent_repos.length === 0 && <div className="text-xs muted">—</div>}
+              </div>
+            </div>
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-slate-500/20 text-slate-300">
+              <GitBranch size={18} />
+            </div>
+          </div>
         </div>
-        <div className="mt-3 text-xs muted">
-          Viewing: <span className="text-slate-200">{selectedTenant}</span> /{" "}
-          <span className="text-slate-200">{selectedService}</span> /{" "}
-          <span className="text-slate-200">{selectedEnv}</span>
-        </div>
-      </Panel>
-
-      {/* KPI row */}
-      <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-4">
-        <KpiCard title="Active Incidents" value={summary.active_incidents} tone="warn" />
-        <KpiCard title="Tests Executed Today" value={summary.tests_executed_today} tone="ok" />
-        <KpiCard title="Recent Rollbacks" value={summary.recent_rollbacks} tone="bad" />
-        <KpiCard title="LLM Insights Used" value={summary.llm_insights_used} tone="llm" />
       </div>
 
-      {/* Main grid: Incidents + RCA */}
+      {/* ── Main grid: Sessions table + RCA panel ── */}
       <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-3">
         <Panel className="lg:col-span-2">
           <PanelHeader
-            title="Current Incidents"
-            badge={<span className="text-xs muted">{incidents.length} shown</span>}
+            title="Investigation Sessions"
+            badge={<span className="text-xs muted">{sessions.length} shown</span>}
           />
           <div className="mt-3">
-            <IncidentsTable
-              incidents={incidents}
-              selectedId={selectedIncidentId}
-              onSelect={setSelectedIncidentId}
-            />
-          </div>
-        </Panel>
-
-        <Panel>
-          <PanelHeader title="Root Cause Analysis" />
-          <div className="mt-3">
-            <RcaPanel
-              detail={incidentDetail}
-              events={incidentEvents}
-              serviceName={selectedService}
-              envName={selectedEnv}
-            />
-          </div>
-        </Panel>
-      </div>
-
-      {/* Charts row */}
-      <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <Panel>
-          <PanelHeader title="Test Execution Summary" />
-          <div className="mt-3 h-52">
-            <Charts kind="tests" events={events} />
-          </div>
-        </Panel>
-        <Panel>
-          <PanelHeader title="LLM Usage Trends" />
-          <div className="mt-3 h-52">
-            <Charts kind="llm" events={events} />
-          </div>
-        </Panel>
-      </div>
-
-      {/* Bottom row */}
-      <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <Panel>
-          <PanelHeader title="Slack Notifications" />
-          <div className="mt-3">
-            <SlackNotifications events={slackEvents} />
-          </div>
-        </Panel>
-
-        <Panel>
-          <PanelHeader title="Activity Feed" />
-          <div className="mt-3 space-y-2">
-            {events.slice(0, 5).map((e) => (
-              <div
-                key={e.id}
-                className="flex items-start justify-between gap-4 rounded-lg border border-white/10 bg-white/5 px-3 py-2"
-              >
-                <div className="min-w-0">
-                  <div className="text-xs muted">{e.type}</div>
-                  <div className="truncate text-sm text-slate-200">{e.message}</div>
-                </div>
-              </div>
-            ))}
-            {events.length === 0 && <div className="text-sm muted">Waiting for events…</div>}
+            <SessionsTable sessions={sessions} selectedId={selectedId} onSelect={setSelectedId} />
           </div>
         </Panel>
 
         <Panel>
           <PanelHeader
-            title="Recent Artifacts"
+            title="AI Investigation"
             badge={
-              artifacts.length > 4 ? (
-                <button className="text-xs text-indigo-300 hover:text-indigo-200">View All</button>
-              ) : undefined
+              <div className="flex items-center gap-1.5">
+                <BedrockIcon size={14} />
+                <span className="text-xs muted">Bedrock</span>
+              </div>
             }
           />
           <div className="mt-3">
-            <ArtifactList artifacts={artifacts} apiBase={API_BASE} />
+            <InvestigationPanel detail={sessionDetail} reasoning={reasoning} />
           </div>
         </Panel>
       </div>
+
+      {/* ── Charts row + Artifacts ── */}
+      <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-3">
+        <Panel>
+          <PanelHeader
+            title="Command Execution"
+            badge={
+              <div className="flex items-center gap-1.5">
+                <CloudWatchIcon size={14} />
+                <ECSIcon size={14} />
+              </div>
+            }
+          />
+          <div className="mt-3 h-36">
+            <CommandChart commands={commands} />
+          </div>
+        </Panel>
+
+        <Panel>
+          <PanelHeader
+            title="Reasoning Turns"
+            badge={
+              <div className="flex items-center gap-1.5">
+                <BedrockIcon size={14} />
+                <span className="text-xs muted">per session</span>
+              </div>
+            }
+          />
+          <div className="mt-3 h-36">
+            <ReasoningChart sessions={sessions} />
+          </div>
+        </Panel>
+
+        <Panel>
+          <PanelHeader
+            title="Artifacts"
+            badge={
+              <div className="flex items-center gap-1.5">
+                <S3Icon size={14} />
+                <span className="text-xs muted">{artifacts.length} files</span>
+              </div>
+            }
+          />
+          <div className="mt-3">
+            {artifacts.length > 0 && sessionDetail ? (
+              <ArtifactList
+                filenames={artifacts}
+                downloadUrl={(name) => artifactDownloadUrl(sessionDetail.session.session_id, name)}
+              />
+            ) : (
+              <div className="text-sm muted">
+                {selectedId ? "No artifacts yet." : "Select a session to view artifacts."}
+              </div>
+            )}
+          </div>
+        </Panel>
+      </div>
+
+      {/* ── Slack Notifications ── */}
+      <div className="mt-4">
+        <Panel>
+          <SlackNotifications notifications={slackNotifications} />
+        </Panel>
+      </div>
+
+      {/* ── Command history (shown when session is selected) ── */}
+      {sessionDetail && (
+        <div className="mt-4">
+          <Panel>
+            <PanelHeader
+              title="Command & Tool History"
+              badge={<span className="text-xs muted">{commands.length} records</span>}
+            />
+            <div className="mt-3 space-y-2 max-h-64 overflow-y-auto">
+              {commands.map((c, i) => (
+                <div key={i} className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs">
+                  <div className="flex items-center gap-2 mb-1">
+                    <CommandIcon command={c.command} type={c.type} />
+                    <span
+                      className={`rounded px-1.5 py-0.5 font-mono text-xs ${
+                        c.type === "shell"
+                          ? "bg-sky-500/20 text-sky-300"
+                          : "bg-violet-500/20 text-violet-300"
+                      }`}
+                    >
+                      {c.type}
+                    </span>
+                    <span className="text-slate-200 font-mono truncate flex-1">{c.command}</span>
+                    {c.exit_code != null && (
+                      <span className={`ml-auto shrink-0 font-mono ${c.exit_code === 0 ? "text-emerald-400" : "text-rose-400"}`}>
+                        exit {c.exit_code}
+                      </span>
+                    )}
+                  </div>
+                  {c.stdout && (
+                    <pre className="muted whitespace-pre-wrap text-xs mt-1 line-clamp-2">{c.stdout}</pre>
+                  )}
+                  <div className="muted mt-1">{formatTs(c.ts)}</div>
+                </div>
+              ))}
+              {commands.length === 0 && <div className="text-sm muted">No commands recorded.</div>}
+            </div>
+          </Panel>
+        </div>
+      )}
+
     </main>
   );
 }
+

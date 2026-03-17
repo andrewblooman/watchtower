@@ -1,0 +1,45 @@
+# Build context exclusions — prevents secrets and unnecessary files from
+# being sent to the Docker daemon and potentially embedded in the image.
+
+# Secrets and environment files
+.env
+.env.*
+ui/.env
+ui/.env.*
+!ui/.env.example
+
+# Git and CI
+.git
+.gitignore
+.github
+
+# Compose override (local dev only)
+docker-compose.override.yml
+
+# Docs and non-build assets
+*.md
+Dashboard.png
+docs/
+security-results.md
+
+# Python caches and build artefacts
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+*.egg-info/
+dist/
+build/
+
+# Node / UI (source only — built output is handled by the ui-builder stage)
+ui/node_modules/
+ui/.next/
+ui/out/
+
+# Local data and sample files
+data/
+sample-data/
+
+# Tooling configs not needed at runtime
+copilot-instructions.md
