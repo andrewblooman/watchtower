@@ -1,6 +1,6 @@
 # SRE Agent  Ephemeral ECS Debugging Agent
 
-![Dashboard Screenshot](Dashboard.png)
+![Dashboard Screenshot](Dashboard.jpeg)
 
 An AI-powered debugging agent that runs as a short-lived ECS task per deployment. It gathers data from CloudWatch and other AWS APIs, reasons over it with Amazon Bedrock (Claude), and stores all artifacts to S3. The local cache is ephemeral  when the container restarts, memory is cleared.
 
